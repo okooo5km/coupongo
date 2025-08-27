@@ -89,10 +89,48 @@ var promoGetCmd = &cobra.Command{
 var promoCreateCmd = &cobra.Command{
 	Use:   "create <coupon_id>",
 	Short: "Create a promotion code",
-	Long:  "Create a promotion code for an existing coupon.",
-	Args:  cobra.ExactArgs(1),
+	Long: `Create a promotion code for an existing coupon.
+
+Use flags for quick creation or no flags for interactive prompts.
+
+Available flags:
+  --prefix, -p           Prefix for auto-generated code (e.g., BEAR -> BEAR_XXXXXXXX)
+  --customer             Restrict to specific customer ID
+  --active, -a           Set as active (default: true)
+  --expires-at           Expiry timestamp (Unix timestamp)
+  --max-redemptions, -m  Maximum redemptions (0 for unlimited)
+  --first-time-only      Restrict to first-time transactions only
+  --minimum-amount       Minimum amount in cents
+  --currency             Currency for minimum amount (default: usd)
+
+Interactive prompts (when no flags used) will guide you through:
+  • Promotion code (optional, auto-generated if empty)
+  • Customer restriction (optional, specific customer ID)
+  • Active status (active or inactive)
+  • Expiry timestamp (optional)
+  • Maximum redemptions (optional)
+  • First-time transaction only (yes/no)
+  • Minimum amount restriction (optional, in cents)
+  • Currency (for minimum amount)
+
+Examples:
+  coupongo promo create coup_1234567890                                    # Interactive creation
+  coupongo promo create coup_1234567890 --prefix SAVE                      # Auto-generate with prefix
+  coupongo promo create coup_1234567890 --prefix BEAR --max-redemptions 100  # With limits
+  coupongo promo create coup_1234567890 --customer cus_xxx --active=false  # Customer-specific, inactive`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		couponID := args[0]
+
+		// Get flags
+		prefix, _ := cmd.Flags().GetString("prefix")
+		customer, _ := cmd.Flags().GetString("customer")
+		active, _ := cmd.Flags().GetBool("active")
+		expiresAt, _ := cmd.Flags().GetInt64("expires-at")
+		maxRedemptions, _ := cmd.Flags().GetInt64("max-redemptions")
+		firstTimeOnly, _ := cmd.Flags().GetBool("first-time-only")
+		minimumAmount, _ := cmd.Flags().GetInt64("minimum-amount")
+		currency, _ := cmd.Flags().GetString("currency")
 
 		// Verify coupon exists
 		couponService := stripe.NewCouponService(stripeClient)
@@ -103,9 +141,47 @@ var promoCreateCmd = &cobra.Command{
 
 		fmt.Printf("Creating promotion code for coupon: %s (%s)\n", coupon.ID, stripe.FormatCouponValue(coupon))
 
-		opts, err := promptPromoCodeOptions(couponID)
-		if err != nil {
-			return fmt.Errorf("failed to get promotion code options: %w", err)
+		var opts stripe.PromotionCodeCreateOptions
+
+		// Check if any flags were provided
+		hasFlags := prefix != "" || customer != "" || expiresAt != 0 || maxRedemptions != 0 ||
+			firstTimeOnly || minimumAmount != 0 || cmd.Flags().Changed("active")
+
+		if hasFlags {
+			// Use flag values
+			opts = stripe.PromotionCodeCreateOptions{
+				CouponID: couponID,
+				Customer: customer,
+				Active:   &active,
+			}
+
+			// Generate code with prefix if provided
+			if prefix != "" {
+				generatedCode := stripe.GenerateSinglePromotionCode(prefix)
+				opts.Code = generatedCode
+				fmt.Printf("Generated code with prefix '%s': %s\n", prefix, generatedCode)
+			}
+
+			// Set optional parameters
+			if expiresAt != 0 {
+				opts.ExpiresAt = &expiresAt
+			}
+			if maxRedemptions != 0 {
+				opts.MaxRedemptions = &maxRedemptions
+			}
+			if firstTimeOnly {
+				opts.FirstTimeTransaction = &firstTimeOnly
+			}
+			if minimumAmount != 0 {
+				opts.MinimumAmount = &minimumAmount
+				opts.Currency = strings.ToLower(currency)
+			}
+		} else {
+			// Use interactive prompts
+			opts, err = promptPromoCodeOptions(couponID)
+			if err != nil {
+				return fmt.Errorf("failed to get promotion code options: %w", err)
+			}
 		}
 
 		promoService := stripe.NewPromotionCodeService(stripeClient)
@@ -192,8 +268,19 @@ var promoBatchCmd = &cobra.Command{
 var promoUpdateCmd = &cobra.Command{
 	Use:   "update <promo_id>",
 	Short: "Update a promotion code",
-	Long:  "Update a promotion code's active status and metadata.",
-	Args:  cobra.ExactArgs(1),
+	Long: `Update a promotion code's active status and metadata.
+
+Interactive prompts will guide you through:
+  • Active status (active or inactive)
+  • Metadata updates (planned feature)
+
+Note: Other promotion code properties (code, customer, expiry, etc.) 
+cannot be modified after creation per Stripe API limitations.
+
+Examples:
+  coupongo promo update promo_1234567890           # Update status interactively
+  coupongo promo update promo_1234567890 --env test  # Update in test environment`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		promoID := args[0]
 
@@ -247,6 +334,15 @@ func init() {
 	promoBatchCmd.Flags().IntP("count", "n", 0, "Number of promotion codes to create")
 	promoBatchCmd.Flags().StringP("prefix", "p", "", "Prefix for promotion codes")
 	promoBatchCmd.Flags().Int64("max-redemptions", 0, "Maximum redemptions per code")
+
+	promoCreateCmd.Flags().StringP("prefix", "p", "", "Prefix for promotion code (e.g., BEAR generates BEAR_HUHOIPQW)")
+	promoCreateCmd.Flags().StringP("customer", "", "", "Restrict to specific customer ID")
+	promoCreateCmd.Flags().BoolP("active", "a", true, "Set promotion code as active (default: true)")
+	promoCreateCmd.Flags().Int64P("expires-at", "", 0, "Expiry timestamp (Unix timestamp)")
+	promoCreateCmd.Flags().Int64P("max-redemptions", "m", 0, "Maximum redemptions (0 for unlimited)")
+	promoCreateCmd.Flags().BoolP("first-time-only", "", false, "Restrict to first-time transactions only")
+	promoCreateCmd.Flags().Int64P("minimum-amount", "", 0, "Minimum amount in cents")
+	promoCreateCmd.Flags().StringP("currency", "", "usd", "Currency for minimum amount")
 }
 
 // promptPromoCodeOptions prompts user for promotion code creation options
@@ -260,6 +356,48 @@ func promptPromoCodeOptions(couponID string) (stripe.PromotionCodeCreateOptions,
 	}
 	code, _ := codePrompt.Run()
 	opts.Code = code
+
+	// Customer (optional)
+	customerPrompt := promptui.Prompt{
+		Label: "Restrict to specific customer (leave empty to allow any customer, enter customer ID)",
+	}
+	customer, _ := customerPrompt.Run()
+	opts.Customer = customer
+
+	// Active status
+	activePrompt := promptui.Select{
+		Label: "Set promotion code as active?",
+		Items: []string{"Yes", "No"},
+	}
+	_, activeChoice, err := activePrompt.Run()
+	if err != nil {
+		return opts, err
+	}
+	active := activeChoice == "Yes"
+	opts.Active = &active
+
+	// Expires at (optional)
+	expiresAtPrompt := promptui.Prompt{
+		Label: "Expires at timestamp (leave empty for no expiry, format: 1640995200 for 2022-01-01)",
+		Validate: func(input string) error {
+			if input == "" {
+				return nil
+			}
+			val, err := strconv.ParseInt(input, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid timestamp")
+			}
+			if val <= 0 {
+				return fmt.Errorf("timestamp must be greater than 0")
+			}
+			return nil
+		},
+	}
+	expiresAtStr, _ := expiresAtPrompt.Run()
+	if expiresAtStr != "" {
+		expiresAt, _ := strconv.ParseInt(expiresAtStr, 10, 64)
+		opts.ExpiresAt = &expiresAt
+	}
 
 	// Max redemptions (optional)
 	maxRedemptionsPrompt := promptui.Prompt{

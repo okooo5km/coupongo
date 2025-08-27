@@ -83,7 +83,23 @@ var couponGetCmd = &cobra.Command{
 var couponCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new coupon",
-	Long:  "Create a new coupon with specified discount and settings.",
+	Long: `Create a new coupon with specified discount and settings.
+
+Interactive prompts will guide you through:
+  • Coupon ID (optional, auto-generated if empty)
+  • Coupon name
+  • Discount type (percentage or fixed amount)
+  • Currency (for fixed amount coupons)
+  • Duration (once, forever, or repeating)
+  • Duration in months (for repeating coupons)
+  • Maximum redemptions (optional)
+  • Expiry timestamp (optional)
+  • Product restrictions (optional, comma-separated product IDs)
+  • Multi-currency amounts (optional, format: eur:950,jpy:1500)
+
+Examples:
+  coupongo coupon create                    # Interactive creation
+  coupongo coupon create --env production   # Create in production environment`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts, err := promptCouponOptions(false)
 		if err != nil {
@@ -108,8 +124,16 @@ var couponCreateCmd = &cobra.Command{
 var couponUpdateCmd = &cobra.Command{
 	Use:   "update <coupon_id>",
 	Short: "Update a coupon",
-	Long:  "Update a coupon's name and metadata. Note: discount values cannot be changed after creation.",
-	Args:  cobra.ExactArgs(1),
+	Long: `Update a coupon's name and metadata. Note: discount values cannot be changed after creation.
+
+Interactive prompts will guide you through:
+  • Coupon name (optional, leave empty to keep current)
+  • Metadata updates (planned feature)
+
+Examples:
+  coupongo coupon update coup_1234567890    # Update coupon interactively
+  coupongo coupon update coup_1234567890 --env test  # Update in test environment`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		couponID := args[0]
 
@@ -320,6 +344,70 @@ func promptCouponOptions(isUpdate bool) (stripe.CouponCreateOptions, error) {
 	if maxRedemptionsStr != "" {
 		maxRedemptions, _ := strconv.ParseInt(maxRedemptionsStr, 10, 64)
 		opts.MaxRedemptions = &maxRedemptions
+	}
+
+	// Redeem by (optional)
+	redeemByPrompt := promptui.Prompt{
+		Label: "Redeem by timestamp (leave empty for no expiry, format: 1640995200 for 2022-01-01)",
+		Validate: func(input string) error {
+			if input == "" {
+				return nil
+			}
+			val, err := strconv.ParseInt(input, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid timestamp")
+			}
+			if val <= 0 {
+				return fmt.Errorf("timestamp must be greater than 0")
+			}
+			return nil
+		},
+	}
+	redeemByStr, _ := redeemByPrompt.Run()
+	if redeemByStr != "" {
+		redeemBy, _ := strconv.ParseInt(redeemByStr, 10, 64)
+		opts.RedeemBy = &redeemBy
+	}
+
+	// Applies to products (optional)
+	appliesToPrompt := promptui.Prompt{
+		Label: "Apply to specific products? (leave empty to apply to all, enter comma-separated product IDs)",
+	}
+	appliesToStr, _ := appliesToPrompt.Run()
+	if appliesToStr != "" {
+		productIDs := strings.Split(appliesToStr, ",")
+		for i, id := range productIDs {
+			productIDs[i] = strings.TrimSpace(id)
+		}
+		if len(productIDs) > 0 && productIDs[0] != "" {
+			opts.AppliesTo = &stripe.CouponAppliesToOptions{
+				Products: productIDs,
+			}
+		}
+	}
+
+	// Currency options (optional) - only for amount_off coupons
+	if opts.AmountOff != nil {
+		currencyOptionsPrompt := promptui.Prompt{
+			Label: "Add currency-specific amounts? (leave empty to skip, format: eur:950,jpy:1500)",
+		}
+		currencyOptionsStr, _ := currencyOptionsPrompt.Run()
+		if currencyOptionsStr != "" {
+			opts.CurrencyOptions = make(map[string]*stripe.CouponCurrencyOptions)
+			pairs := strings.Split(currencyOptionsStr, ",")
+			for _, pair := range pairs {
+				parts := strings.Split(strings.TrimSpace(pair), ":")
+				if len(parts) == 2 {
+					currency := strings.ToLower(strings.TrimSpace(parts[0]))
+					amountStr := strings.TrimSpace(parts[1])
+					if amount, err := strconv.ParseInt(amountStr, 10, 64); err == nil {
+						opts.CurrencyOptions[currency] = &stripe.CouponCurrencyOptions{
+							AmountOff: &amount,
+						}
+					}
+				}
+			}
+		}
 	}
 
 	return opts, nil

@@ -25,6 +25,7 @@ type PromotionCodeCreateOptions struct {
 	CouponID             string
 	Code                 string
 	Active               *bool
+	Customer             string
 	MaxRedemptions       *int64
 	MinimumAmount        *int64
 	Currency             string
@@ -46,6 +47,7 @@ type BatchCreateOptions struct {
 	CouponID             string
 	Count                int
 	Prefix               string
+	Customer             string
 	MaxRedemptions       *int64
 	MinimumAmount        *int64
 	Currency             string
@@ -115,6 +117,10 @@ func (pcs *PromotionCodeService) CreatePromotionCode(opts PromotionCodeCreateOpt
 
 	if opts.Active != nil {
 		params.Active = stripe.Bool(*opts.Active)
+	}
+
+	if opts.Customer != "" {
+		params.Customer = stripe.String(opts.Customer)
 	}
 
 	if opts.MaxRedemptions != nil {
@@ -202,6 +208,7 @@ func (pcs *PromotionCodeService) BatchCreatePromotionCodes(opts BatchCreateOptio
 		createOpts := PromotionCodeCreateOptions{
 			CouponID:             opts.CouponID,
 			Code:                 code,
+			Customer:             opts.Customer,
 			MaxRedemptions:       opts.MaxRedemptions,
 			MinimumAmount:        opts.MinimumAmount,
 			Currency:             opts.Currency,
@@ -245,6 +252,24 @@ func generatePromotionCode(prefix string, index int) string {
 	suffix := rng.Intn(100000)
 
 	return fmt.Sprintf("%s%d_%05d", strings.ToUpper(prefix), index, suffix)
+}
+
+// GenerateSinglePromotionCode generates a single promotion code with 8-char suffix
+func GenerateSinglePromotionCode(prefix string) string {
+	if prefix == "" {
+		prefix = "PROMO"
+	}
+
+	// Generate 8 random characters (A-Z, 0-9)
+	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	suffix := make([]byte, 8)
+	for i := range suffix {
+		suffix[i] = charset[rng.Intn(len(charset))]
+	}
+
+	return fmt.Sprintf("%s_%s", strings.ToUpper(prefix), string(suffix))
 }
 
 // FormatPromotionCodeStatus returns a formatted status string

@@ -29,7 +29,19 @@ type CouponCreateOptions struct {
 	DurationInMonths *int64
 	MaxRedemptions   *int64
 	RedeemBy         *int64
+	AppliesTo        *CouponAppliesToOptions
+	CurrencyOptions  map[string]*CouponCurrencyOptions
 	Metadata         map[string]string
+}
+
+// CouponAppliesToOptions holds applies_to options for a coupon
+type CouponAppliesToOptions struct {
+	Products []string
+}
+
+// CouponCurrencyOptions holds currency-specific options for a coupon
+type CouponCurrencyOptions struct {
+	AmountOff *int64
 }
 
 // CouponUpdateOptions holds options for updating a coupon
@@ -147,6 +159,23 @@ func (cs *CouponService) CreateCoupon(opts CouponCreateOptions) (*stripe.Coupon,
 
 	if opts.Metadata != nil {
 		params.Metadata = opts.Metadata
+	}
+
+	if opts.AppliesTo != nil && len(opts.AppliesTo.Products) > 0 {
+		params.AppliesTo = &stripe.CouponAppliesToParams{
+			Products: stripe.StringSlice(opts.AppliesTo.Products),
+		}
+	}
+
+	if opts.CurrencyOptions != nil {
+		params.CurrencyOptions = make(map[string]*stripe.CouponCurrencyOptionsParams)
+		for currency, options := range opts.CurrencyOptions {
+			if options != nil && options.AmountOff != nil {
+				params.CurrencyOptions[currency] = &stripe.CouponCurrencyOptionsParams{
+					AmountOff: stripe.Int64(*options.AmountOff),
+				}
+			}
+		}
 	}
 
 	c, err := coupon.New(params)
