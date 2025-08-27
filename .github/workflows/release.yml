@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+        cache: true
+
+    - name: Run tests
+      run: go test -v ./...
+
+    - name: Create dist directory
+      run: mkdir -p dist
+
+    - name: Build binaries
+      run: |
+        # Build for multiple platforms
+        GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/coupongo-linux-amd64 ./cmd/cli
+        GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o dist/coupongo-linux-arm64 ./cmd/cli
+        GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/coupongo-darwin-amd64 ./cmd/cli
+        GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/coupongo-darwin-arm64 ./cmd/cli
+        GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/coupongo-windows-amd64.exe ./cmd/cli
+        GOOS=windows GOARCH=arm64 go build -ldflags="-s -w" -o dist/coupongo-windows-arm64.exe ./cmd/cli
+
+    - name: Create checksums
+      run: |
+        cd dist
+        sha256sum * > checksums.txt
+
+    - name: Create Release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        tag: ${{ github.ref_name }}
+      run: |
+        gh release create "$tag" \
+          --repo="$GITHUB_REPOSITORY" \
+          --title="CouponGo ${tag}" \
+          --notes="## CouponGo ${tag}
+
+        A command-line tool for managing Stripe coupons and promotion codes.
+
+        ### Installation
+
+        #### Install via go install
+        \`\`\`bash
+        go install github.com/$GITHUB_REPOSITORY/cmd/cli@${tag}
+        \`\`\`
+
+        #### Download Binary
+        Download the appropriate binary for your platform from the assets below.
+
+        ### What's Changed
+        - See commit history for detailed changes
+
+        **Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/v0.0.0...${tag}" \
+          dist/*
