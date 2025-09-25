@@ -15,7 +15,17 @@ var (
 	stripeClient  *stripe.Client
 	envFlag       string
 	formatFlag    string
+	appVersion    = "dev"
 )
+
+// SetVersion allows the entrypoint to inject the build version so it stays consistent.
+func SetVersion(v string) {
+	if v == "" {
+		return
+	}
+
+	appVersion = v
+}
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -106,7 +116,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("CouponGo v1.0.0")
+		fmt.Printf("CouponGo %s\n", appVersion)
 		fmt.Println("A CLI tool for managing Stripe coupons and promotion codes")
 	},
 }
