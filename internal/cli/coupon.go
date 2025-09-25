@@ -56,6 +56,10 @@ var couponGetCmd = &cobra.Command{
 	Long:  "Get details of a specific coupon by ID.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if handled, err := handleHelpArgs(cmd, args); handled {
+			return err
+		}
+
 		couponID := args[0]
 		couponService := stripe.NewCouponService(stripeClient)
 
@@ -131,10 +135,14 @@ Interactive prompts will guide you through:
   • Metadata updates (planned feature)
 
 Examples:
-  coupongo coupon update coup_1234567890    # Update coupon interactively
-  coupongo coupon update coup_1234567890 --env test  # Update in test environment`,
+  coupongo coupon update coupon-1234567890    # Update coupon interactively
+  coupongo coupon update coupon-1234567890 --env test  # Update in test environment`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if handled, err := handleHelpArgs(cmd, args); handled {
+			return err
+		}
+
 		couponID := args[0]
 
 		// First, get the existing coupon to show current values
@@ -171,6 +179,10 @@ var couponDeleteCmd = &cobra.Command{
 	Long:  "Delete a coupon. This cannot be undone.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if handled, err := handleHelpArgs(cmd, args); handled {
+			return err
+		}
+
 		couponID := args[0]
 
 		// Confirm deletion

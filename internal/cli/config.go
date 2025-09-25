@@ -190,6 +190,10 @@ var configUseCmd = &cobra.Command{
 	Long:  "Switch to a different environment.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if handled, err := handleHelpArgs(cmd, args); handled {
+			return err
+		}
+
 		if err := configManager.Load(); err != nil {
 			return fmt.Errorf("failed to load configuration: %w", err)
 		}
@@ -210,6 +214,10 @@ var configAddEnvCmd = &cobra.Command{
 	Long:  "Add a new environment to the configuration.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if handled, err := handleHelpArgs(cmd, args); handled {
+			return err
+		}
+
 		if err := configManager.Load(); err != nil {
 			return fmt.Errorf("failed to load configuration: %w", err)
 		}
@@ -247,6 +255,10 @@ var configRemoveEnvCmd = &cobra.Command{
 	Long:  "Remove an environment from the configuration.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if handled, err := handleHelpArgs(cmd, args); handled {
+			return err
+		}
+
 		if err := configManager.Load(); err != nil {
 			return fmt.Errorf("failed to load configuration: %w", err)
 		}
@@ -280,6 +292,10 @@ var configSetKeyCmd = &cobra.Command{
 	Long:  "Set or update the API key for a specific environment.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if handled, err := handleHelpArgs(cmd, args); handled {
+			return err
+		}
+
 		if err := configManager.Load(); err != nil {
 			return fmt.Errorf("failed to load configuration: %w", err)
 		}

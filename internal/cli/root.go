@@ -27,7 +27,7 @@ It supports multiple environments, batch operations, and provides both table and
 Examples:
   coupongo config init                    # Initialize configuration
   coupongo coupon list                    # List all coupons
-  coupongo promo batch coup_xxxx --count 50  # Create 50 promotion codes`,
+  coupongo promo batch coupon-1234 --count 50  # Create 50 promotion codes`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Skip initialization for version command
 		if cmd.Name() == "version" {

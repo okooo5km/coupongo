@@ -47,6 +47,7 @@ type BatchCreateOptions struct {
 	CouponID             string
 	Count                int
 	Prefix               string
+	Separator            string
 	Customer             string
 	MaxRedemptions       *int64
 	MinimumAmount        *int64
@@ -203,7 +204,7 @@ func (pcs *PromotionCodeService) BatchCreatePromotionCodes(opts BatchCreateOptio
 	var errors []error
 
 	for i := 0; i < opts.Count; i++ {
-		code := generatePromotionCode(opts.Prefix, i+1)
+		code := generatePromotionCode(opts.Prefix, opts.Separator, i+1)
 
 		createOpts := PromotionCodeCreateOptions{
 			CouponID:             opts.CouponID,
@@ -242,20 +243,29 @@ func (pcs *PromotionCodeService) BatchCreatePromotionCodes(opts BatchCreateOptio
 }
 
 // generatePromotionCode generates a unique promotion code
-func generatePromotionCode(prefix string, index int) string {
+func generatePromotionCode(prefix, separator string, index int) string {
 	if prefix == "" {
 		prefix = "PROMO"
 	}
+
+	upperPrefix := strings.ToUpper(prefix)
 
 	// Generate a random suffix to make it unique
 	rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(index)))
 	suffix := rng.Intn(100000)
 
-	return fmt.Sprintf("%s%d_%05d", strings.ToUpper(prefix), index, suffix)
+	formattedSuffix := fmt.Sprintf("%05d", suffix)
+	formattedIndex := fmt.Sprintf("%d", index)
+
+	if separator == "" {
+		return upperPrefix + formattedIndex + formattedSuffix
+	}
+
+	return fmt.Sprintf("%s%s%s%s", upperPrefix, formattedIndex, separator, formattedSuffix)
 }
 
 // GenerateSinglePromotionCode generates a single promotion code with 8-char suffix
-func GenerateSinglePromotionCode(prefix string) string {
+func GenerateSinglePromotionCode(prefix, separator string) string {
 	if prefix == "" {
 		prefix = "PROMO"
 	}
@@ -269,7 +279,13 @@ func GenerateSinglePromotionCode(prefix string) string {
 		suffix[i] = charset[rng.Intn(len(charset))]
 	}
 
-	return fmt.Sprintf("%s_%s", strings.ToUpper(prefix), string(suffix))
+	upperPrefix := strings.ToUpper(prefix)
+
+	if separator == "" {
+		return upperPrefix + string(suffix)
+	}
+
+	return fmt.Sprintf("%s%s%s", upperPrefix, separator, string(suffix))
 }
 
 // FormatPromotionCodeStatus returns a formatted status string

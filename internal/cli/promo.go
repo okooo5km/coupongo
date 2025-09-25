@@ -62,6 +62,10 @@ var promoGetCmd = &cobra.Command{
 	Long:  "Get details of a specific promotion code by ID.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if handled, err := handleHelpArgs(cmd, args); handled {
+			return err
+		}
+
 		promoID := args[0]
 		promoService := stripe.NewPromotionCodeService(stripeClient)
 
@@ -94,7 +98,8 @@ var promoCreateCmd = &cobra.Command{
 Use flags for quick creation or no flags for interactive prompts.
 
 Available flags:
-  --prefix, -p           Prefix for auto-generated code (e.g., BEAR -> BEAR_XXXXXXXX)
+  --prefix, -p           Prefix for auto-generated code (e.g., BEAR -> BEAR-XXXXXXXX)
+  --separator            Separator between prefix and generated suffix (default '-', use '' for none)
   --customer             Restrict to specific customer ID
   --active, -a           Set as active (default: true)
   --expires-at           Expiry timestamp (Unix timestamp)
@@ -114,16 +119,22 @@ Interactive prompts (when no flags used) will guide you through:
   • Currency (for minimum amount)
 
 Examples:
-  coupongo promo create coup_1234567890                                    # Interactive creation
-  coupongo promo create coup_1234567890 --prefix SAVE                      # Auto-generate with prefix
-  coupongo promo create coup_1234567890 --prefix BEAR --max-redemptions 100  # With limits
-  coupongo promo create coup_1234567890 --customer cus_xxx --active=false  # Customer-specific, inactive`,
+  coupongo promo create coupon-1234567890                                    # Interactive creation
+  coupongo promo create coupon-1234567890 --prefix SAVE                      # Auto-generate with prefix
+  coupongo promo create coupon-1234567890 --prefix BEAR --separator ''       # Auto-generate without separator
+  coupongo promo create coupon-1234567890 --prefix BEAR --max-redemptions 100  # With limits
+  coupongo promo create coupon-1234567890 --customer customer-abc123 --active=false  # Customer-specific, inactive`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if handled, err := handleHelpArgs(cmd, args); handled {
+			return err
+		}
+
 		couponID := args[0]
 
 		// Get flags
 		prefix, _ := cmd.Flags().GetString("prefix")
+		separator, _ := cmd.Flags().GetString("separator")
 		customer, _ := cmd.Flags().GetString("customer")
 		active, _ := cmd.Flags().GetBool("active")
 		expiresAt, _ := cmd.Flags().GetInt64("expires-at")
@@ -145,7 +156,11 @@ Examples:
 
 		// Check if any flags were provided
 		hasFlags := prefix != "" || customer != "" || expiresAt != 0 || maxRedemptions != 0 ||
-			firstTimeOnly || minimumAmount != 0 || cmd.Flags().Changed("active")
+			firstTimeOnly || minimumAmount != 0 || cmd.Flags().Changed("active") || cmd.Flags().Changed("separator")
+
+		if separator != "" && separator != "-" {
+			return fmt.Errorf("separator must be '-' or empty")
+		}
 
 		if hasFlags {
 			// Use flag values
@@ -157,7 +172,7 @@ Examples:
 
 			// Generate code with prefix if provided
 			if prefix != "" {
-				generatedCode := stripe.GenerateSinglePromotionCode(prefix)
+				generatedCode := stripe.GenerateSinglePromotionCode(prefix, separator)
 				opts.Code = generatedCode
 				fmt.Printf("Generated code with prefix '%s': %s\n", prefix, generatedCode)
 			}
@@ -205,12 +220,21 @@ var promoBatchCmd = &cobra.Command{
 	Long:  "Create multiple promotion codes for an existing coupon.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if handled, err := handleHelpArgs(cmd, args); handled {
+			return err
+		}
+
 		couponID := args[0]
 
 		// Get flags
 		count, _ := cmd.Flags().GetInt("count")
 		prefix, _ := cmd.Flags().GetString("prefix")
+		separator, _ := cmd.Flags().GetString("separator")
 		maxRedemptions, _ := cmd.Flags().GetInt64("max-redemptions")
+
+		if separator != "" && separator != "-" {
+			return fmt.Errorf("separator must be '-' or empty")
+		}
 
 		// Verify coupon exists
 		couponService := stripe.NewCouponService(stripeClient)
@@ -231,6 +255,7 @@ var promoBatchCmd = &cobra.Command{
 				CouponID:       couponID,
 				Count:          count,
 				Prefix:         prefix,
+				Separator:      separator,
 				MaxRedemptions: &maxRedemptions,
 			}
 		}
@@ -278,10 +303,14 @@ Note: Other promotion code properties (code, customer, expiry, etc.)
 cannot be modified after creation per Stripe API limitations.
 
 Examples:
-  coupongo promo update promo_1234567890           # Update status interactively
-  coupongo promo update promo_1234567890 --env test  # Update in test environment`,
+  coupongo promo update promo-1234567890           # Update status interactively
+  coupongo promo update promo-1234567890 --env test  # Update in test environment`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if handled, err := handleHelpArgs(cmd, args); handled {
+			return err
+		}
+
 		promoID := args[0]
 
 		// Get current promotion code
@@ -333,9 +362,11 @@ func init() {
 
 	promoBatchCmd.Flags().IntP("count", "n", 0, "Number of promotion codes to create")
 	promoBatchCmd.Flags().StringP("prefix", "p", "", "Prefix for promotion codes")
+	promoBatchCmd.Flags().String("separator", "-", "Separator between prefix and generated content (use '' for none)")
 	promoBatchCmd.Flags().Int64("max-redemptions", 0, "Maximum redemptions per code")
 
-	promoCreateCmd.Flags().StringP("prefix", "p", "", "Prefix for promotion code (e.g., BEAR generates BEAR_HUHOIPQW)")
+	promoCreateCmd.Flags().StringP("prefix", "p", "", "Prefix for promotion code (e.g., BEAR generates BEAR-HUHOIPQW)")
+	promoCreateCmd.Flags().String("separator", "-", "Separator between prefix and generated suffix (use '' for none)")
 	promoCreateCmd.Flags().StringP("customer", "", "", "Restrict to specific customer ID")
 	promoCreateCmd.Flags().BoolP("active", "a", true, "Set promotion code as active (default: true)")
 	promoCreateCmd.Flags().Int64P("expires-at", "", 0, "Expiry timestamp (Unix timestamp)")
@@ -501,6 +532,18 @@ func promptBatchCreateOptions(couponID string) (stripe.BatchCreateOptions, error
 	}
 	prefix, _ := prefixPrompt.Run()
 	opts.Prefix = prefix
+
+	separatorPrompt := promptui.Select{
+		Label: "Insert hyphen between prefix and generated parts?",
+		Items: []string{"Yes", "No"},
+	}
+	_, separatorChoice, err := separatorPrompt.Run()
+	if err != nil {
+		return opts, err
+	}
+	if separatorChoice == "Yes" {
+		opts.Separator = "-"
+	}
 
 	// Max redemptions
 	maxRedemptionsPrompt := promptui.Prompt{

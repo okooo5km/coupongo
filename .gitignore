@@ -29,6 +29,7 @@ build/
 *.swo
 .claude
 CLAUDE.md
+AGENTS.md
 
 # OS generated files
 .DS_Store
