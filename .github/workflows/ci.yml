@@ -51,7 +51,7 @@ jobs:
       - name: Check GoReleaser config
         uses: goreleaser/goreleaser-action@v6
         with:
-          version: '~> v2'
+          version: 'v2.14.1'
           args: check
 
   build-cross-platform:
