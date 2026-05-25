@@ -9,6 +9,7 @@ import (
 
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // couponCmd represents the coupon command
@@ -23,29 +24,27 @@ var couponListCmd = &cobra.Command{
 	Short: "List all coupons",
 	Long:  "List all coupons in the current Stripe account.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		limit, _ := cmd.Flags().GetInt64("limit")
+		startingAfter, _ := cmd.Flags().GetString("starting-after")
+		if limit <= 0 || limit > 100 {
+			return usageError("limit must be between 1 and 100", "pass `--limit <1..100>`")
+		}
+
 		couponService := stripe.NewCouponService(stripeClient)
-		coupons, err := couponService.ListCoupons()
+		coupons, err := couponService.ListCoupons(limit, startingAfter)
 		if err != nil {
 			return fmt.Errorf("failed to list coupons: %w", err)
 		}
 
 		if len(coupons) == 0 {
+			if effectiveStripeOutputFormat() == FormatJSON {
+				return renderJSON(coupons)
+			}
 			fmt.Println("No coupons found.")
 			return nil
 		}
 
-		// Determine output format
-		format := formatFlag
-		if format == "" {
-			env, _ := stripeClient.GetCurrentEnvironment()
-			if env != nil {
-				format = env.OutputFormat
-			} else {
-				format = "table"
-			}
-		}
-
-		renderer := NewOutputRenderer(format)
+		renderer := NewOutputRenderer(string(effectiveStripeOutputFormat()))
 		return renderer.RenderCoupons(coupons)
 	},
 }
@@ -68,18 +67,7 @@ var couponGetCmd = &cobra.Command{
 			return fmt.Errorf("failed to get coupon: %w", err)
 		}
 
-		// Determine output format
-		format := formatFlag
-		if format == "" {
-			env, _ := stripeClient.GetCurrentEnvironment()
-			if env != nil {
-				format = env.OutputFormat
-			} else {
-				format = "table"
-			}
-		}
-
-		renderer := NewOutputRenderer(format)
+		renderer := NewOutputRenderer(string(effectiveStripeOutputFormat()))
 		return renderer.RenderCoupon(coupon)
 	},
 }
@@ -103,9 +91,11 @@ Interactive prompts will guide you through:
 
 Examples:
   coupongo coupon create                    # Interactive creation
-  coupongo coupon create --env production   # Create in production environment`,
+  coupongo coupon create --env production   # Create in production environment
+  coupongo coupon create --percent-off 20 --duration once --name "Launch 20"
+  coupongo coupon create --amount-off 1500 --currency usd --duration repeating --duration-in-months 3`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		opts, err := promptCouponOptions(false)
+		opts, err := couponCreateOptionsFromCommand(cmd)
 		if err != nil {
 			return fmt.Errorf("failed to get coupon options: %w", err)
 		}
@@ -116,7 +106,11 @@ Examples:
 			return fmt.Errorf("failed to create coupon: %w", err)
 		}
 
-		fmt.Printf("✅ Coupon created successfully!\n")
+		if effectiveStripeOutputFormat() == FormatJSON {
+			return renderJSON(coupon)
+		}
+
+		fmt.Printf("Coupon created successfully!\n")
 		fmt.Printf("   ID: %s\n", coupon.ID)
 		fmt.Printf("   Value: %s\n", stripe.FormatCouponValue(coupon))
 		fmt.Printf("   Duration: %s\n", stripe.FormatCouponDuration(coupon))
@@ -136,7 +130,8 @@ Interactive prompts will guide you through:
 
 Examples:
   coupongo coupon update coupon-1234567890    # Update coupon interactively
-  coupongo coupon update coupon-1234567890 --env test  # Update in test environment`,
+  coupongo coupon update coupon-1234567890 --env test  # Update in test environment
+  coupongo coupon update coupon-1234567890 --name "Updated name"`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if handled, err := handleHelpArgs(cmd, args); handled {
@@ -144,6 +139,13 @@ Examples:
 		}
 
 		couponID := args[0]
+		hasFlags := false
+		cmd.Flags().Visit(func(flag *pflag.Flag) {
+			hasFlags = true
+		})
+		if !hasFlags && !canPrompt() {
+			return usageError("coupon update requires at least one update flag in non-interactive mode", "pass `--name` or `--metadata KEY=VALUE`")
+		}
 
 		// First, get the existing coupon to show current values
 		couponService := stripe.NewCouponService(stripeClient)
@@ -152,10 +154,7 @@ Examples:
 			return fmt.Errorf("failed to get existing coupon: %w", err)
 		}
 
-		fmt.Printf("Updating coupon: %s\n", couponID)
-		fmt.Printf("Current name: %s\n", existing.Name)
-
-		opts, err := promptCouponUpdateOptions()
+		opts, err := couponUpdateOptionsFromCommand(cmd, existing.Name)
 		if err != nil {
 			return fmt.Errorf("failed to get update options: %w", err)
 		}
@@ -165,7 +164,11 @@ Examples:
 			return fmt.Errorf("failed to update coupon: %w", err)
 		}
 
-		fmt.Printf("✅ Coupon updated successfully!\n")
+		if effectiveStripeOutputFormat() == FormatJSON {
+			return renderJSON(coupon)
+		}
+
+		fmt.Printf("Coupon updated successfully!\n")
 		fmt.Printf("   ID: %s\n", coupon.ID)
 		fmt.Printf("   Name: %s\n", coupon.Name)
 
@@ -185,16 +188,21 @@ var couponDeleteCmd = &cobra.Command{
 
 		couponID := args[0]
 
-		// Confirm deletion
-		prompt := promptui.Select{
-			Label: fmt.Sprintf("Are you sure you want to delete coupon '%s'?", couponID),
-			Items: []string{"Yes", "No"},
-		}
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes {
+			if !canPrompt() {
+				return usageError("coupon delete requires --yes in non-interactive mode", "retry with `--yes` after confirming the deletion is intended")
+			}
 
-		_, choice, err := prompt.Run()
-		if err != nil || choice == "No" {
-			fmt.Println("Operation cancelled.")
-			return nil
+			prompt := promptui.Select{
+				Label: fmt.Sprintf("Are you sure you want to delete coupon '%s'?", couponID),
+				Items: []string{"Yes", "No"},
+			}
+
+			_, choice, err := prompt.Run()
+			if err != nil || choice == "No" {
+				return cancelledError("operation cancelled")
+			}
 		}
 
 		couponService := stripe.NewCouponService(stripeClient)
@@ -202,7 +210,15 @@ var couponDeleteCmd = &cobra.Command{
 			return fmt.Errorf("failed to delete coupon: %w", err)
 		}
 
-		fmt.Printf("✅ Coupon '%s' deleted successfully!\n", couponID)
+		result := map[string]interface{}{
+			"deleted": true,
+			"id":      couponID,
+		}
+		if effectiveStripeOutputFormat() == FormatJSON {
+			return renderJSON(result)
+		}
+
+		fmt.Printf("Coupon '%s' deleted successfully!\n", couponID)
 		return nil
 	},
 }
@@ -214,6 +230,158 @@ func init() {
 	couponCmd.AddCommand(couponCreateCmd)
 	couponCmd.AddCommand(couponUpdateCmd)
 	couponCmd.AddCommand(couponDeleteCmd)
+
+	couponListCmd.Flags().Int64("limit", 100, "Maximum coupons to fetch. Required range: 1..100")
+	couponListCmd.Flags().String("starting-after", "", "Cursor ID for Stripe pagination")
+
+	couponCreateCmd.Flags().String("id", "", "Coupon ID. Optional; Stripe auto-generates when omitted")
+	couponCreateCmd.Flags().String("name", "", "Coupon name")
+	couponCreateCmd.Flags().Float64("percent-off", 0, "Percentage discount. Required unless --amount-off is set. Range: 0 < value <= 100")
+	couponCreateCmd.Flags().Int64("amount-off", 0, "Fixed discount amount in the smallest currency unit. Required unless --percent-off is set")
+	couponCreateCmd.Flags().String("currency", "usd", "Currency for --amount-off. ISO 4217 lowercase code")
+	couponCreateCmd.Flags().String("duration", "once", "Coupon duration. One of: once, forever, repeating")
+	couponCreateCmd.Flags().Int64("duration-in-months", 0, "Required when --duration repeating")
+	couponCreateCmd.Flags().Int64("max-redemptions", 0, "Maximum redemptions. Omit for unlimited")
+	couponCreateCmd.Flags().Int64("redeem-by", 0, "Unix timestamp after which the coupon can no longer be redeemed")
+	couponCreateCmd.Flags().String("products", "", "Comma-separated Stripe product IDs to restrict the coupon")
+	couponCreateCmd.Flags().String("currency-options", "", "Currency-specific amounts, for example eur:950,jpy:1500")
+	couponCreateCmd.Flags().StringArray("metadata", nil, "Metadata key-value pair. Repeat as KEY=VALUE")
+
+	couponUpdateCmd.Flags().String("name", "", "New coupon name")
+	couponUpdateCmd.Flags().StringArray("metadata", nil, "Metadata key-value pair. Repeat as KEY=VALUE")
+
+	couponDeleteCmd.Flags().Bool("yes", false, "Confirm deletion without an interactive prompt")
+}
+
+func couponCreateOptionsFromCommand(cmd *cobra.Command) (stripe.CouponCreateOptions, error) {
+	if len(cmd.Flags().Args()) > 0 {
+		return stripe.CouponCreateOptions{}, usageError("coupon create does not accept positional arguments", "use named flags such as `--percent-off` or run interactively in a terminal")
+	}
+
+	hasFlags := false
+	cmd.Flags().Visit(func(flag *pflag.Flag) {
+		hasFlags = true
+	})
+	if !hasFlags && canPrompt() {
+		return promptCouponOptions(false)
+	}
+
+	opts := stripe.CouponCreateOptions{}
+	id, _ := cmd.Flags().GetString("id")
+	name, _ := cmd.Flags().GetString("name")
+	percent, _ := cmd.Flags().GetFloat64("percent-off")
+	amount, _ := cmd.Flags().GetInt64("amount-off")
+	currency, _ := cmd.Flags().GetString("currency")
+	duration, _ := cmd.Flags().GetString("duration")
+	durationMonths, _ := cmd.Flags().GetInt64("duration-in-months")
+	maxRedemptions, _ := cmd.Flags().GetInt64("max-redemptions")
+	redeemBy, _ := cmd.Flags().GetInt64("redeem-by")
+	products, _ := cmd.Flags().GetString("products")
+	currencyOptions, _ := cmd.Flags().GetString("currency-options")
+	metadataValues, _ := cmd.Flags().GetStringArray("metadata")
+
+	opts.ID = id
+	opts.Name = name
+	opts.Currency = strings.ToLower(currency)
+	opts.Duration = duration
+
+	if cmd.Flags().Changed("percent-off") {
+		if percent <= 0 || percent > 100 {
+			return opts, usageError("percent-off must be greater than 0 and at most 100", "pass `--percent-off <number>` in the range 0..100")
+		}
+		opts.PercentOff = &percent
+	}
+	if cmd.Flags().Changed("amount-off") {
+		amountPtr, err := int64PtrIfPositive(amount, true, "--amount-off")
+		if err != nil {
+			return opts, err
+		}
+		opts.AmountOff = amountPtr
+	}
+	if opts.PercentOff == nil && opts.AmountOff == nil {
+		return opts, usageError("coupon create requires --percent-off or --amount-off in non-interactive mode", "pass exactly one discount flag")
+	}
+	if opts.PercentOff != nil && opts.AmountOff != nil {
+		return opts, usageError("coupon create accepts only one discount type", "pass either `--percent-off` or `--amount-off`, not both")
+	}
+	if duration == "repeating" {
+		durationPtr, err := int64PtrIfPositive(durationMonths, true, "--duration-in-months")
+		if err != nil {
+			return opts, err
+		}
+		opts.DurationInMonths = durationPtr
+	}
+	if ptr, err := int64PtrIfPositive(maxRedemptions, cmd.Flags().Changed("max-redemptions"), "--max-redemptions"); err != nil {
+		return opts, err
+	} else {
+		opts.MaxRedemptions = ptr
+	}
+	if ptr, err := int64PtrIfPositive(redeemBy, cmd.Flags().Changed("redeem-by"), "--redeem-by"); err != nil {
+		return opts, err
+	} else {
+		opts.RedeemBy = ptr
+	}
+	if productIDs := parseCSV(products); len(productIDs) > 0 {
+		opts.AppliesTo = &stripe.CouponAppliesToOptions{Products: productIDs}
+	}
+	if currencyOptions != "" {
+		parsed, err := parseCouponCurrencyOptions(currencyOptions)
+		if err != nil {
+			return opts, err
+		}
+		opts.CurrencyOptions = parsed
+	}
+	metadata, err := parseKeyValueList(metadataValues)
+	if err != nil {
+		return opts, err
+	}
+	opts.Metadata = metadata
+
+	return opts, nil
+}
+
+func couponUpdateOptionsFromCommand(cmd *cobra.Command, currentName string) (stripe.CouponUpdateOptions, error) {
+	hasFlags := false
+	cmd.Flags().Visit(func(flag *pflag.Flag) {
+		hasFlags = true
+	})
+	if !hasFlags && canPrompt() {
+		fmt.Printf("Updating coupon: %s\n", cmd.Flags().Arg(0))
+		fmt.Printf("Current name: %s\n", currentName)
+		return promptCouponUpdateOptions()
+	}
+	if !hasFlags {
+		return stripe.CouponUpdateOptions{}, usageError("coupon update requires at least one update flag in non-interactive mode", "pass `--name` or `--metadata KEY=VALUE`")
+	}
+
+	name, _ := cmd.Flags().GetString("name")
+	metadataValues, _ := cmd.Flags().GetStringArray("metadata")
+	metadata, err := parseKeyValueList(metadataValues)
+	if err != nil {
+		return stripe.CouponUpdateOptions{}, err
+	}
+
+	return stripe.CouponUpdateOptions{
+		Name:     name,
+		Metadata: metadata,
+	}, nil
+}
+
+func parseCouponCurrencyOptions(value string) (map[string]*stripe.CouponCurrencyOptions, error) {
+	result := make(map[string]*stripe.CouponCurrencyOptions)
+	for _, pair := range parseCSV(value) {
+		currency, amountText, ok := strings.Cut(pair, ":")
+		if !ok || currency == "" || amountText == "" {
+			return nil, usageError("invalid currency-options value", "use comma-separated currency:amount pairs, for example `eur:950,jpy:1500`")
+		}
+		amount, err := strconv.ParseInt(amountText, 10, 64)
+		if err != nil || amount <= 0 {
+			return nil, usageError("currency option amount must be a positive integer", "use the smallest currency unit, for example `eur:950`")
+		}
+		amountCopy := amount
+		result[strings.ToLower(currency)] = &stripe.CouponCurrencyOptions{AmountOff: &amountCopy}
+	}
+	return result, nil
 }
 
 // promptCouponOptions prompts user for coupon creation options

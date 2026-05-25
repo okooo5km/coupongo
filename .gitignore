@@ -18,7 +18,7 @@
 go.work
 
 # Build output
-coupongo
+/coupongo
 dist/
 build/
 

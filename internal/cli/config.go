@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -26,6 +25,10 @@ var configInitCmd = &cobra.Command{
 	Short: "Initialize coupongo configuration",
 	Long:  "Initialize coupongo configuration by setting up environments and API keys interactively.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if hasConfigInitFlags(cmd) || !canPrompt() {
+			return configInitFromFlags(cmd)
+		}
+
 		// Load existing config or create new
 		if err := configManager.Load(); err != nil {
 			return fmt.Errorf("failed to load configuration: %w", err)
@@ -43,7 +46,7 @@ var configInitCmd = &cobra.Command{
 
 			_, choice, err := prompt.Run()
 			if err != nil {
-				return fmt.Errorf("selection cancelled")
+				return cancelledError("selection cancelled")
 			}
 
 			switch choice {
@@ -78,7 +81,7 @@ var configShowCmd = &cobra.Command{
 			return nil
 		}
 
-		if formatFlag == "json" {
+		if effectiveOutputFormat("") == FormatJSON {
 			// Hide API keys in JSON output for security
 			configCopy := *config
 			configCopy.Environments = make(map[string]types.Environment)
@@ -90,11 +93,7 @@ var configShowCmd = &cobra.Command{
 				configCopy.Environments[name] = envCopy
 			}
 
-			data, err := json.MarshalIndent(configCopy, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal config: %w", err)
-			}
-			fmt.Println(string(data))
+			return renderJSON(configCopy)
 		} else {
 			fmt.Printf("Current Environment: %s\n\n", config.CurrentEnvironment)
 
@@ -156,21 +155,17 @@ var configListEnvCmd = &cobra.Command{
 		}
 
 		current := configManager.GetCurrentEnvironment()
+		sort.Strings(envs)
 
-		if formatFlag == "json" {
+		if effectiveOutputFormat("") == FormatJSON {
 			result := map[string]interface{}{
 				"current_environment": current,
 				"environments":        envs,
 			}
-			data, err := json.MarshalIndent(result, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal environments: %w", err)
-			}
-			fmt.Println(string(data))
+			return renderJSON(result)
 		} else {
 			fmt.Printf("Current environment: %s\n\n", current)
 			fmt.Println("Available environments:")
-			sort.Strings(envs)
 			for _, env := range envs {
 				marker := "  "
 				if env == current {
@@ -203,7 +198,14 @@ var configUseCmd = &cobra.Command{
 			return fmt.Errorf("failed to switch environment: %w", err)
 		}
 
-		fmt.Printf("✅ Switched to environment: %s\n", envName)
+		result := map[string]interface{}{
+			"current_environment": envName,
+		}
+		if effectiveOutputFormat("") == FormatJSON {
+			return renderJSON(result)
+		}
+
+		fmt.Printf("Switched to environment: %s\n", envName)
 		return nil
 	},
 }
@@ -229,22 +231,43 @@ var configAddEnvCmd = &cobra.Command{
 			return fmt.Errorf("environment '%s' already exists", envName)
 		}
 
-		apiKey, err := configManager.PromptAPIKey(envName)
-		if err != nil {
-			return fmt.Errorf("failed to get API key: %w", err)
+		apiKey, _ := cmd.Flags().GetString("api-key")
+		if apiKey == "" {
+			if !canPrompt() {
+				return usageError("config add-env requires --api-key in non-interactive mode", "pass `--api-key <sk_...>`")
+			}
+			var err error
+			apiKey, err = configManager.PromptAPIKey(envName)
+			if err != nil {
+				return fmt.Errorf("failed to get API key: %w", err)
+			}
+		}
+		currency, _ := cmd.Flags().GetString("currency")
+		outputFormat, _ := cmd.Flags().GetString("output-format")
+		if err := validateOutputFormat(outputFormat); err != nil {
+			return err
 		}
 
 		env := types.Environment{
 			StripeAPIKey:    apiKey,
-			DefaultCurrency: "usd",
-			OutputFormat:    "table",
+			DefaultCurrency: strings.ToLower(currency),
+			OutputFormat:    outputFormat,
 		}
 
 		if err := configManager.AddEnvironment(envName, env); err != nil {
 			return fmt.Errorf("failed to add environment: %w", err)
 		}
 
-		fmt.Printf("✅ Environment '%s' added successfully!\n", envName)
+		result := map[string]interface{}{
+			"environment": envName,
+			"currency":    env.DefaultCurrency,
+			"output":      env.OutputFormat,
+		}
+		if effectiveOutputFormat("") == FormatJSON {
+			return renderJSON(result)
+		}
+
+		fmt.Printf("Environment '%s' added successfully!\n", envName)
 		return nil
 	},
 }
@@ -265,23 +288,36 @@ var configRemoveEnvCmd = &cobra.Command{
 
 		envName := args[0]
 
-		// Confirm deletion
-		prompt := promptui.Select{
-			Label: fmt.Sprintf("Are you sure you want to remove environment '%s'?", envName),
-			Items: []string{"Yes", "No"},
-		}
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes {
+			if !canPrompt() {
+				return usageError("config remove-env requires --yes in non-interactive mode", "retry with `--yes` after confirming the environment removal is intended")
+			}
 
-		_, choice, err := prompt.Run()
-		if err != nil || choice == "No" {
-			fmt.Println("Operation cancelled.")
-			return nil
+			prompt := promptui.Select{
+				Label: fmt.Sprintf("Are you sure you want to remove environment '%s'?", envName),
+				Items: []string{"Yes", "No"},
+			}
+
+			_, choice, err := prompt.Run()
+			if err != nil || choice == "No" {
+				return cancelledError("operation cancelled")
+			}
 		}
 
 		if err := configManager.RemoveEnvironment(envName); err != nil {
 			return fmt.Errorf("failed to remove environment: %w", err)
 		}
 
-		fmt.Printf("✅ Environment '%s' removed successfully!\n", envName)
+		result := map[string]interface{}{
+			"removed":     true,
+			"environment": envName,
+		}
+		if effectiveOutputFormat("") == FormatJSON {
+			return renderJSON(result)
+		}
+
+		fmt.Printf("Environment '%s' removed successfully!\n", envName)
 		return nil
 	},
 }
@@ -302,16 +338,31 @@ var configSetKeyCmd = &cobra.Command{
 
 		envName := args[0]
 
-		apiKey, err := configManager.PromptAPIKey(envName)
-		if err != nil {
-			return fmt.Errorf("failed to get API key: %w", err)
+		apiKey, _ := cmd.Flags().GetString("api-key")
+		if apiKey == "" {
+			if !canPrompt() {
+				return usageError("config set-key requires --api-key in non-interactive mode", "pass `--api-key <sk_...>`")
+			}
+			var err error
+			apiKey, err = configManager.PromptAPIKey(envName)
+			if err != nil {
+				return fmt.Errorf("failed to get API key: %w", err)
+			}
 		}
 
 		if err := configManager.UpdateEnvironmentAPIKey(envName, apiKey); err != nil {
 			return fmt.Errorf("failed to update API key: %w", err)
 		}
 
-		fmt.Printf("✅ API key updated for environment '%s'!\n", envName)
+		result := map[string]interface{}{
+			"environment": envName,
+			"updated":     true,
+		}
+		if effectiveOutputFormat("") == FormatJSON {
+			return renderJSON(result)
+		}
+
+		fmt.Printf("API key updated for environment '%s'!\n", envName)
 		return nil
 	},
 }
@@ -321,24 +372,54 @@ var configResetCmd = &cobra.Command{
 	Short: "Reset configuration to default",
 	Long:  "Reset configuration to default settings, removing all environments and API keys.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Confirm reset
-		prompt := promptui.Select{
-			Label: "Are you sure you want to reset all configuration? This will remove all environments and API keys.",
-			Items: []string{"Yes", "No"},
-		}
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes {
+			if !canPrompt() {
+				return usageError("config reset requires --yes in non-interactive mode", "retry with `--yes` after confirming the reset is intended")
+			}
 
-		_, choice, err := prompt.Run()
-		if err != nil || choice == "No" {
-			fmt.Println("Operation cancelled.")
-			return nil
+			prompt := promptui.Select{
+				Label: "Are you sure you want to reset all configuration? This will remove all environments and API keys.",
+				Items: []string{"Yes", "No"},
+			}
+
+			_, choice, err := prompt.Run()
+			if err != nil || choice == "No" {
+				return cancelledError("operation cancelled")
+			}
 		}
 
 		if err := configManager.Reset(); err != nil {
 			return fmt.Errorf("failed to reset configuration: %w", err)
 		}
 
-		fmt.Println("✅ Configuration reset to default!")
+		result := map[string]interface{}{
+			"reset": true,
+			"path":  configManager.FilePath(),
+		}
+		if effectiveOutputFormat("") == FormatJSON {
+			return renderJSON(result)
+		}
+
+		fmt.Println("Configuration reset to default!")
 		fmt.Println("Run 'coupongo config init' to set up a new configuration.")
+		return nil
+	},
+}
+
+var configPathCmd = &cobra.Command{
+	Use:   "path",
+	Short: "Print the configuration file path",
+	Long:  "Print the absolute path to the coupongo configuration file.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		result := map[string]interface{}{
+			"path": configManager.FilePath(),
+		}
+		if effectiveOutputFormat("") == FormatJSON {
+			return renderJSON(result)
+		}
+
+		fmt.Println(configManager.FilePath())
 		return nil
 	},
 }
@@ -353,6 +434,97 @@ func init() {
 	configCmd.AddCommand(configRemoveEnvCmd)
 	configCmd.AddCommand(configSetKeyCmd)
 	configCmd.AddCommand(configResetCmd)
+	configCmd.AddCommand(configPathCmd)
+
+	configInitCmd.Flags().String("env-name", "test", "Environment name to create")
+	configInitCmd.Flags().String("api-key", "", "Stripe API key for the environment")
+	configInitCmd.Flags().String("currency", "usd", "Default currency. ISO 4217 lowercase code")
+	configInitCmd.Flags().String("output-format", "table", "Default saved output format. One of: table, json, list")
+	configInitCmd.Flags().Bool("skip-test", false, "Skip Stripe API key validation during setup")
+	configInitCmd.Flags().Bool("force", false, "Reset existing config before initializing")
+
+	configAddEnvCmd.Flags().String("api-key", "", "Stripe API key for the environment")
+	configAddEnvCmd.Flags().String("currency", "usd", "Default currency. ISO 4217 lowercase code")
+	configAddEnvCmd.Flags().String("output-format", "table", "Default saved output format. One of: table, json, list")
+	configRemoveEnvCmd.Flags().Bool("yes", false, "Confirm removal without an interactive prompt")
+	configSetKeyCmd.Flags().String("api-key", "", "Stripe API key for the environment")
+	configResetCmd.Flags().Bool("yes", false, "Confirm reset without an interactive prompt")
+}
+
+func hasConfigInitFlags(cmd *cobra.Command) bool {
+	return cmd.Flags().Changed("env-name") ||
+		cmd.Flags().Changed("api-key") ||
+		cmd.Flags().Changed("currency") ||
+		cmd.Flags().Changed("output-format") ||
+		cmd.Flags().Changed("skip-test") ||
+		cmd.Flags().Changed("force")
+}
+
+func configInitFromFlags(cmd *cobra.Command) error {
+	envName, _ := cmd.Flags().GetString("env-name")
+	apiKey, _ := cmd.Flags().GetString("api-key")
+	currency, _ := cmd.Flags().GetString("currency")
+	outputFormat, _ := cmd.Flags().GetString("output-format")
+	skipTest, _ := cmd.Flags().GetBool("skip-test")
+	force, _ := cmd.Flags().GetBool("force")
+
+	if envName == "" {
+		return usageError("config init requires a non-empty --env-name", "pass `--env-name test`")
+	}
+	if apiKey == "" {
+		return usageError("config init requires --api-key in non-interactive mode", "pass `--api-key <sk_...>` or run `coupongo config init` in a terminal")
+	}
+	if err := validateOutputFormat(outputFormat); err != nil {
+		return err
+	}
+
+	_, statErr := os.Stat(configManager.FilePath())
+	configExists := statErr == nil
+
+	if err := configManager.Load(); err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+	if force {
+		if err := configManager.Reset(); err != nil {
+			return fmt.Errorf("failed to reset configuration: %w", err)
+		}
+	} else if configExists && len(configManager.ListEnvironments()) > 0 {
+		return conflictError("configuration already exists", "use `coupongo config add-env <environment> --api-key <sk_...>` or rerun init with `--force`")
+	}
+
+	if !skipTest {
+		if err := configManager.TestAPIKeyForSetup(apiKey); err != nil {
+			return fmt.Errorf("API key test failed: %w", err)
+		}
+	}
+
+	env := types.Environment{
+		StripeAPIKey:    apiKey,
+		DefaultCurrency: strings.ToLower(currency),
+		OutputFormat:    outputFormat,
+	}
+	if err := configManager.AddEnvironment(envName, env); err != nil {
+		return fmt.Errorf("failed to add environment: %w", err)
+	}
+	if err := configManager.SetCurrentEnvironment(envName); err != nil {
+		return fmt.Errorf("failed to set current environment: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"environment": envName,
+		"currency":    env.DefaultCurrency,
+		"output":      env.OutputFormat,
+		"path":        configManager.FilePath(),
+	}
+	if effectiveOutputFormat("") == FormatJSON {
+		return renderJSON(result)
+	}
+
+	fmt.Printf("Configuration saved successfully!\n")
+	fmt.Printf("   Environment: %s\n", envName)
+	fmt.Printf("   Currency: %s\n", env.DefaultCurrency)
+	fmt.Printf("   Output: %s\n", env.OutputFormat)
+	return nil
 }
 
 // addEnvironmentInteractive adds a new environment interactively

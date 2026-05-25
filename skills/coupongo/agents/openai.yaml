@@ -1,0 +1,4 @@
+interface:
+  display_name: "CouponGo"
+  short_description: "Use the AI-friendly CouponGo Stripe CLI"
+  default_prompt: "Use $coupongo to inspect CouponGo readiness and manage Stripe coupons safely."

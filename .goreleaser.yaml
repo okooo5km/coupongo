@@ -1,0 +1,92 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: coupongo
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: coupongo
+    binary: coupongo
+    main: ./cmd/cli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: coupongo
+    ids:
+      - coupongo
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge"
+  groups:
+    - title: "Features"
+      regexp: '^feat(\(.+\))?:'
+      order: 0
+    - title: "Bug Fixes"
+      regexp: '^fix(\(.+\))?:'
+      order: 1
+    - title: "Documentation"
+      regexp: '^docs?(\(.+\))?:'
+      order: 2
+    - title: "Build and CI"
+      regexp: '^(build|ci)(\(.+\))?:'
+      order: 3
+    - title: "Maintenance"
+      regexp: '^chore(\(.+\))?:'
+      order: 4
+    - title: "Others"
+      order: 999
+
+brews:
+  - name: coupongo
+    repository:
+      owner: okooo5km
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_author:
+      name: okooo5km
+      email: okooo5km@gmail.com
+    directory: Formula
+    homepage: "https://github.com/okooo5km/coupongo"
+    description: "AI-friendly CLI for managing Stripe coupons and promotion codes"
+    license: MIT
+    test: |
+      system "#{bin}/coupongo", "version"
+    install: |
+      bin.install "coupongo"
+
+release:
+  name_template: "CouponGo v{{ .Version }}"
+  header: |
+    ## CouponGo v{{ .Version }}
+  footer: |
+    **Full Changelog**: https://github.com/okooo5km/coupongo/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    ---
+    Install via Homebrew: `brew install okooo5km/tap/coupongo`

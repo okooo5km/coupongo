@@ -19,6 +19,7 @@ type OutputFormat string
 const (
 	OutputFormatTable OutputFormat = "table"
 	OutputFormatJSON  OutputFormat = "json"
+	OutputFormatList  OutputFormat = "list"
 )
 
 // DefaultConfig returns a default configuration

@@ -222,6 +222,11 @@ func (m *Manager) GetConfig() *types.Config {
 	return m.config
 }
 
+// FilePath returns the absolute path to the configuration file.
+func (m *Manager) FilePath() string {
+	return m.filePath
+}
+
 // Reset resets configuration to default
 func (m *Manager) Reset() error {
 	m.config = types.DefaultConfig()

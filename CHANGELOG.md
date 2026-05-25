@@ -7,30 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-25
+
 ### Added
-- Initial release of CouponGo
-- Multi-environment Stripe API management
-- Interactive coupon creation and management
-- Promotion code creation (single and batch)
-- Three output formats: table, JSON with highlighting, and detailed list
-- Secure configuration file management
-- Cross-platform binary builds
-- GitHub Actions for CI/CD
+- AI mode with structured JSON envelopes, clean stdout/stderr separation, no-color output, and prompt-free execution.
+- Machine-readable `schema` command for command discovery, flags, mutation markers, and error kinds.
+- `doctor` command for local readiness checks and optional Stripe connectivity checks.
+- Non-interactive flags for coupon, promotion-code, and configuration write workflows.
+- Built-in Codex Skill at `skills/coupongo/SKILL.md`.
+- GoReleaser release pipeline with Homebrew tap publishing to `okooo5km/homebrew-tap`.
 
-### Features
-- **Coupon Management**: Create, list, view, update, and delete Stripe coupons
-- **Promotion Codes**: Create individual or batch promotion codes for coupons
-- **Multi-Environment**: Support for test, production, and custom environments
-- **Interactive CLI**: User-friendly prompts for all operations
-- **Flexible Output**: Table, JSON, and list formats with color coding
-- **Secure Storage**: API keys stored securely in `~/.coupongo.json`
-- **Cross-Platform**: Binaries available for Linux, macOS, and Windows (AMD64 and ARM64)
+### Changed
+- JSON output is now plain pretty-printed JSON instead of ANSI-highlighted JSON.
+- CI now checks module tidiness, GoReleaser config, static analysis, and cross-platform builds.
+- Release builds now inject the tag version into `coupongo version`.
 
-### Installation Methods
-- Direct `go install` from GitHub
-- Download pre-built binaries from releases
-- Build from source with provided Makefile
+### Fixed
+- Stripe SDK logging is silenced so AI-mode stderr remains valid structured JSON.
+- `skills/coupongo` is no longer ignored as if it were the local binary.
 
-## [0.1.0] - TBD
+## [0.1.1] - 2025-09-25
 
-- Initial release (planned)
+### Changed
+- Centralized CLI version handling so builds can inject release metadata.
+
+## [0.1.0] - 2025-08-27
+
+### Added
+- Initial CouponGo CLI for Stripe coupon and promotion-code management.
+- Multi-environment Stripe API configuration.
+- Interactive coupon and promotion-code workflows.
+- Table, JSON, and list output formats.
+- Cross-platform build and GitHub Actions release scaffolding.

@@ -1,14 +1,12 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/hokaccha/go-prettyjson"
 	"github.com/olekukonko/tablewriter"
 	stripe_api "github.com/stripe/stripe-go/v82"
 )
@@ -35,33 +33,13 @@ func NewOutputRenderer(format string) *OutputRenderer {
 	return &OutputRenderer{format: OutputFormat(format)}
 }
 
-// RenderJSON renders data as pretty-printed JSON with syntax highlighting
+// RenderJSON renders data as plain pretty-printed JSON.
 func (r *OutputRenderer) RenderJSON(data interface{}) error {
 	if r.format != FormatJSON {
 		return fmt.Errorf("renderer not in JSON mode")
 	}
 
-	// Convert to JSON with proper formatting
-	formatter := prettyjson.NewFormatter()
-	formatter.Indent = 2
-	formatter.KeyColor = color.New(color.FgBlue, color.Bold)
-	formatter.StringColor = color.New(color.FgGreen)
-	formatter.BoolColor = color.New(color.FgYellow)
-	formatter.NumberColor = color.New(color.FgCyan)
-	formatter.NullColor = color.New(color.FgBlack, color.Bold)
-
-	jsonBytes, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("failed to marshal data: %w", err)
-	}
-
-	coloredBytes, err := formatter.Format(jsonBytes)
-	if err != nil {
-		return fmt.Errorf("failed to format JSON: %w", err)
-	}
-
-	fmt.Println(string(coloredBytes))
-	return nil
+	return renderJSON(data)
 }
 
 // Color helper functions

@@ -66,8 +66,11 @@ build-all:
 	# macOS arm64 (Apple Silicon)
 	GOOS=darwin GOARCH=arm64 go build ${LDFLAGS} -o ${BUILD_DIR}/${BINARY_NAME}-darwin-arm64 ${CMD_PATH}
 	
-	# Windows amd64
+# Windows amd64
 	GOOS=windows GOARCH=amd64 go build ${LDFLAGS} -o ${BUILD_DIR}/${BINARY_NAME}-windows-amd64.exe ${CMD_PATH}
+
+	# Windows arm64
+	GOOS=windows GOARCH=arm64 go build ${LDFLAGS} -o ${BUILD_DIR}/${BINARY_NAME}-windows-arm64.exe ${CMD_PATH}
 	
 	@echo "Cross-compilation completed:"
 	@ls -la ${BUILD_DIR}/

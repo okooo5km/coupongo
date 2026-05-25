@@ -29,26 +29,31 @@ func SetVersion(v string) {
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "coupongo",
-	Short: "A CLI tool for managing Stripe coupons and promotion codes",
-	Long: `CouponGo is a command line interface for managing Stripe coupons and promotion codes.
-It supports multiple environments, batch operations, and provides both table and JSON output formats.
-
-Examples:
-  coupongo config init                    # Initialize configuration
-  coupongo coupon list                    # List all coupons
-  coupongo promo batch coupon-1234 --count 50  # Create 50 promotion codes`,
+	SilenceErrors: true,
+	SilenceUsage:  true,
+	Use:           "coupongo",
+	Short:         "A CLI tool for managing Stripe coupons and promotion codes",
+	Long: "CouponGo is a command line interface for managing Stripe coupons and promotion codes.\n" +
+		"It supports multiple environments, batch operations, and provides both table and JSON output formats.\n\n" +
+		"Examples:\n" +
+		"  coupongo config init                         # Initialize configuration\n" +
+		"  coupongo coupon list                         # List all coupons\n" +
+		"  coupongo promo batch coupon-1234 --count 50  # Create 50 promotion codes",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Skip initialization for version command
-		if cmd.Name() == "version" {
+		configureRuntime()
+
+		if err := validateOutputFormat(formatFlag); err != nil {
+			return err
+		}
+
+		// Skip initialization for commands that do not need Stripe API access.
+		if cmd.Name() == "version" || cmd.Name() == "schema" || cmd.Name() == "doctor" || isCommandOrParent(cmd, "completion") {
 			return nil
 		}
 
-		// Skip initialization for config commands that don't need Stripe API
+		// Config commands manage local state and must not require a usable Stripe key.
 		if cmd.Parent() != nil && cmd.Parent().Name() == "config" {
-			if cmd.Name() == "init" || cmd.Name() == "show" || cmd.Name() == "list-env" || cmd.Name() == "reset" {
-				return nil
-			}
+			return nil
 		}
 
 		// Initialize configuration
@@ -63,18 +68,24 @@ Examples:
 		}
 
 		// Check if environment exists
-		_, err := configManager.GetEnvironment(targetEnv)
+		targetConfig, err := configManager.GetEnvironment(targetEnv)
 		if err != nil {
 			if err == config.ErrEnvironmentNotFound {
-				fmt.Printf("Environment '%s' not found.\n", targetEnv)
-				fmt.Printf("Available environments: %v\n", configManager.ListEnvironments())
-				fmt.Println("\nRun 'coupongo config init' to set up a new environment.")
-				return fmt.Errorf("environment not found")
+				return notFoundError(
+					fmt.Sprintf("environment %q not found", targetEnv),
+					fmt.Sprintf("available environments: %v; run `coupongo config init` or `coupongo config add-env <name>`", configManager.ListEnvironments()),
+				)
 			}
 			return err
 		}
 
 		// Ensure API key exists for the environment
+		if targetConfig.StripeAPIKey == "" && nonInteractive() {
+			return usageError(
+				fmt.Sprintf("environment %q has no Stripe API key", targetEnv),
+				fmt.Sprintf("run `coupongo config set-key %s --api-key <sk_...>`", targetEnv),
+			)
+		}
 		if err := configManager.EnsureAPIKey(targetEnv); err != nil {
 			return fmt.Errorf("failed to ensure API key: %w", err)
 		}
@@ -88,10 +99,20 @@ Examples:
 	},
 }
 
+func isCommandOrParent(cmd *cobra.Command, name string) bool {
+	for current := cmd; current != nil; current = current.Parent() {
+		if current.Name() == name {
+			return true
+		}
+	}
+	return false
+}
+
 // Execute adds all child commands to the root command and sets flags appropriately.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		renderError(err)
+		os.Exit(exitCodeForError(err))
 	}
 }
 
@@ -103,11 +124,17 @@ func init() {
 	// Add persistent flags
 	rootCmd.PersistentFlags().StringVarP(&envFlag, "env", "e", "", "Environment to use (overrides current environment)")
 	rootCmd.PersistentFlags().StringVarP(&formatFlag, "format", "f", "", "Output format (table|json|list)")
+	rootCmd.PersistentFlags().StringVar(&formatFlag, "output", "", "Output format alias for --format (table|json|list)")
+	rootCmd.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Shortcut for --format json")
+	rootCmd.PersistentFlags().BoolVar(&aiFlag, "ai", false, "AI mode: JSON output, no color, no prompts, structured errors")
+	rootCmd.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable ANSI color output")
 
 	// Add subcommands
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(couponCmd)
 	rootCmd.AddCommand(promoCmd)
+	rootCmd.AddCommand(schemaCmd)
+	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 
@@ -116,6 +143,13 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version information",
 	Run: func(cmd *cobra.Command, args []string) {
+		if effectiveOutputFormat("") == FormatJSON {
+			_ = renderJSON(map[string]interface{}{
+				"version": appVersion,
+				"name":    "coupongo",
+			})
+			return
+		}
 		fmt.Printf("CouponGo %s\n", appVersion)
 		fmt.Println("A CLI tool for managing Stripe coupons and promotion codes")
 	},

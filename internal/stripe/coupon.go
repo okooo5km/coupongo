@@ -50,14 +50,20 @@ type CouponUpdateOptions struct {
 	Metadata map[string]string
 }
 
-// ListCoupons lists all coupons
-func (cs *CouponService) ListCoupons() ([]*stripe.Coupon, error) {
+// ListCoupons lists coupons with bounded pagination.
+func (cs *CouponService) ListCoupons(limit int64, startingAfter string) ([]*stripe.Coupon, error) {
 	if !cs.client.IsInitialized() {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
 	params := &stripe.CouponListParams{}
-	params.Filters.AddFilter("limit", "", "100")
+	if limit <= 0 {
+		limit = 100
+	}
+	params.Filters.AddFilter("limit", "", strconv.FormatInt(limit, 10))
+	if startingAfter != "" {
+		params.Filters.AddFilter("starting_after", "", startingAfter)
+	}
 
 	var coupons []*stripe.Coupon
 

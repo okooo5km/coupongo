@@ -166,6 +166,14 @@ func (m *Manager) testAPIKey(apiKey string) error {
 	return nil
 }
 
+// TestAPIKeyForSetup validates an API key without storing it.
+func (m *Manager) TestAPIKeyForSetup(apiKey string) error {
+	if err := validateAPIKey(apiKey); err != nil {
+		return err
+	}
+	return m.testAPIKey(apiKey)
+}
+
 // EnsureAPIKey ensures an API key exists for the given environment
 // If not found, prompts user to enter it
 func (m *Manager) EnsureAPIKey(envName string) error {

@@ -16,6 +16,10 @@ type Client struct {
 	config *config.Manager
 }
 
+func init() {
+	stripe.DefaultLeveledLogger = &stripe.LeveledLogger{Level: stripe.LevelNull}
+}
+
 // NewClient creates a new Stripe client
 func NewClient(configManager *config.Manager) *Client {
 	return &Client{

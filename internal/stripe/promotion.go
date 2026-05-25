@@ -57,17 +57,23 @@ type BatchCreateOptions struct {
 	Metadata             map[string]string
 }
 
-// ListPromotionCodes lists promotion codes, optionally filtered by coupon
-func (pcs *PromotionCodeService) ListPromotionCodes(couponID string) ([]*stripe.PromotionCode, error) {
+// ListPromotionCodes lists promotion codes with optional filtering and bounded pagination.
+func (pcs *PromotionCodeService) ListPromotionCodes(couponID string, limit int64, startingAfter string) ([]*stripe.PromotionCode, error) {
 	if !pcs.client.IsInitialized() {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
 	params := &stripe.PromotionCodeListParams{}
-	params.Filters.AddFilter("limit", "", "100")
+	if limit <= 0 {
+		limit = 100
+	}
+	params.Filters.AddFilter("limit", "", fmt.Sprintf("%d", limit))
 
 	if couponID != "" {
 		params.Filters.AddFilter("coupon", "", couponID)
+	}
+	if startingAfter != "" {
+		params.Filters.AddFilter("starting_after", "", startingAfter)
 	}
 
 	var codes []*stripe.PromotionCode
