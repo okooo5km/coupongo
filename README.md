@@ -242,6 +242,12 @@ CouponGo ships with a Codex Skill:
 skills/coupongo/SKILL.md
 ```
 
+Install it into Codex with:
+
+```bash
+npx skills add okooo5km/coupongo
+```
+
 Agents should use it when asked to manage Stripe coupons or promotion codes through CouponGo. The Skill instructs agents to start with `doctor --ai`, inspect `schema`, use non-interactive flags, avoid invented IDs, and require explicit intent before production writes or deletion.
 
 ## Development
